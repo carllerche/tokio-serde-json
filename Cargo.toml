@@ -1,0 +1,12 @@
+[package]
+name = "tokio-serde-json"
+version = "0.1.0"
+authors = ["Carl Lerche <me@carllerche.com>"]
+
+[dependencies]
+futures = "0.1"
+bytes = { git = "https://github.com/carllerche/bytes" }
+# tokio-serde = { git = "https://github.com/carllerche/tokio-serde" }
+tokio-serde = { path = "/Users/carllerche/Code/Oss/Tokio/serde/tokio-serde" }
+serde = "0.9"
+serde_json = "0.9"
