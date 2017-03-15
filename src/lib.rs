@@ -10,7 +10,7 @@
 //!
 //! # Examples
 //!
-//! ```no_run
+//! ```ignore
 //! use futures::{Future, Sink};
 //!
 //! use tokio_core::reactor::Core;
