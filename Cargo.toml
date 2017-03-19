@@ -5,11 +5,11 @@ authors = ["Carl Lerche <me@carllerche.com>"]
 
 [dependencies]
 futures = "0.1"
-bytes = { git = "https://github.com/carllerche/bytes" }
+bytes = "0.4"
 tokio-serde = { git = "https://github.com/carllerche/tokio-serde" }
 serde = "0.9"
 serde_json = "0.9"
 
 [dev-dependencies]
-tokio-core = { git = "https://github.com/alexcrichton/tokio-core", branch = "tio" }
-tokio-io = { git = "http://github.com/alexcrichton/tokio-io" }
+tokio-core = "0.1"
+tokio-io = "0.1"
