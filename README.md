@@ -17,7 +17,7 @@ tokio-serde-json = { git = "https://github.com/carllerche/tokio-serde-json" }
 Next, add this to your crate:
 
 ```rust
-extern crate tokio_serde;
+extern crate tokio_serde_json;
 
 use tokio_serde_json::{ReadJson, WriteJson};
 ```
