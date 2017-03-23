@@ -145,6 +145,26 @@ impl<T, U> Stream for ReadJson<T, U>
     }
 }
 
+impl<T, U> Sink for ReadJson<T, U>
+    where T: Sink,
+{
+    type SinkItem = T::SinkItem;
+    type SinkError = T::SinkError;
+
+    fn start_send(&mut self, item: T::SinkItem)
+                  -> StartSend<T::SinkItem, T::SinkError> {
+        self.get_mut().start_send(item)
+    }
+
+    fn poll_complete(&mut self) -> Poll<(), T::SinkError> {
+        self.get_mut().poll_complete()
+    }
+
+    fn close(&mut self) -> Poll<(), T::SinkError> {
+        self.get_mut().close()
+    }
+}
+
 impl<T, U> WriteJson<T, U>
     where T: Sink<SinkItem = BytesMut, SinkError = io::Error>,
           U: Serialize,
@@ -200,6 +220,17 @@ impl<T, U> Sink for WriteJson<T, U>
 
     fn close(&mut self) -> Poll<(), io::Error> {
         self.inner.poll_complete()
+    }
+}
+
+impl<T, U> Stream for WriteJson<T, U>
+    where T: Stream + Sink,
+{
+    type Item = T::Item;
+    type Error = T::Error;
+
+    fn poll(&mut self) -> Poll<Option<T::Item>, T::Error> {
+        self.get_mut().poll()
     }
 }
 
