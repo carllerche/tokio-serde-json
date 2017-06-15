@@ -60,7 +60,6 @@ extern crate tokio_serde;
 use futures::{Stream, Poll, Sink, StartSend};
 use bytes::{Bytes, BytesMut, Buf, IntoBuf};
 use serde::{Serialize, Deserialize};
-use serde_json::error::Error;
 use tokio_serde::{Serializer, Deserializer, FramedRead, FramedWrite};
 
 use std::io;
@@ -86,13 +85,19 @@ pub struct WriteJson<T: Sink, U> {
     inner: FramedWrite<T, U, Json<U>>,
 }
 
+#[derive(Debug)]
+pub enum Error {
+    Io(io::Error),
+    Serde(serde_json::Error),
+}
+
 struct Json<T> {
     ghost: PhantomData<T>,
 }
 
 impl<T, U> ReadJson<T, U>
     where T: Stream<Error = io::Error>,
-          U: Deserialize,
+          for<'a> U: Deserialize<'a>,
           Bytes: From<T::Item>,
 {
     /// Creates a new `ReadJson` with the given buffer stream.
@@ -134,7 +139,7 @@ impl<T, U> ReadJson<T, U> {
 
 impl<T, U> Stream for ReadJson<T, U>
     where T: Stream<Error = io::Error>,
-          U: Deserialize,
+          for<'a> U: Deserialize<'a>,
           Bytes: From<T::Item>,
 {
     type Item = U;
@@ -234,11 +239,14 @@ impl<T, U> Stream for WriteJson<T, U>
     }
 }
 
-impl<T: Deserialize> Deserializer<T> for Json<T> {
+impl<T> Deserializer<T> for Json<T>
+    where for <'a> T: Deserialize<'a>,
+{
     type Error = Error;
 
     fn deserialize(&mut self, src: &Bytes) -> Result<T, Error> {
         serde_json::from_reader(src.into_buf().reader())
+            .map_err(Error::Serde)
     }
 }
 
@@ -249,5 +257,11 @@ impl<T: Serialize> Serializer<T> for Json<T> {
         serde_json::to_vec(item)
             .map(Into::into)
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+    }
+}
+
+impl From<io::Error> for Error {
+    fn from(src: io::Error) -> Self {
+        Error::Io(src)
     }
 }
