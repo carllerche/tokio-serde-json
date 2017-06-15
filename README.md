@@ -3,7 +3,7 @@
 Utilities needed to easily implement a Tokio JSON transport using [serde] for
 JSON serialization and deserialization of frame values.
 
-[Documentation](https://carllerche.github.io/tokio-serde/tokio_serde/index.html)
+[Documentation](https://carllerche.github.io/tokio-serde-json/tokio_serde_json/index.html)
 
 ## Usage
 
