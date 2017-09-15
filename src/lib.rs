@@ -62,7 +62,7 @@ use bytes::{Bytes, BytesMut, Buf, IntoBuf};
 use serde::{Serialize, Deserialize};
 use tokio_serde::{Serializer, Deserializer, FramedRead, FramedWrite};
 
-use std::io;
+use std::{io, error, fmt};
 use std::marker::PhantomData;
 
 /// Adapts a stream of JSON encoded buffers to a stream of values by
@@ -89,6 +89,31 @@ pub struct WriteJson<T: Sink, U> {
 pub enum Error {
     Io(io::Error),
     Serde(serde_json::Error),
+}
+
+impl error::Error for Error {
+    fn description(&self) -> &str {
+        match *self {
+            Error::Io(ref io) => io.description(),
+            Error::Serde(ref json) => json.description(),
+        }
+    }
+
+    fn cause(&self) -> Option<&error::Error> {
+        match *self {
+            Error::Io(ref io) => Some(io),
+            Error::Serde(ref serde) => Some(serde),
+        }
+    }
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            Error::Io(ref io) => fmt::Display::fmt(io, f),
+            Error::Serde(ref serde) => fmt::Display::fmt(serde, f),
+        }
+    }
 }
 
 struct Json<T> {
