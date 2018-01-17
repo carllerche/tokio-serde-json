@@ -47,8 +47,8 @@
 //! For a full working server and client example, see the [examples] directory.
 //!
 //! [`Bytes`]: https://docs.rs/bytes/0.4/bytes/struct.Bytes.html
-//! [`length_delimited`]: http://alexcrichton.com/tokio-io/tokio_io/codec/length_delimited/index.html
-//! [tokio-io]: http://github.com/alexcrichton/tokio-io
+//! [`length_delimited`]: https://docs.rs/tokio-io/0.1/tokio_io/codec/length_delimited/index.html
+//! [tokio-io]: https://github.com/tokio-rs/tokio-io
 //! [examples]: https://github.com/carllerche/tokio-serde-json/tree/master/examples
 
 extern crate futures;
