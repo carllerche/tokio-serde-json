@@ -62,7 +62,6 @@ use bytes::{Bytes, BytesMut, Buf, IntoBuf};
 use serde::{Serialize, Deserialize};
 use tokio_serde::{Serializer, Deserializer, FramedRead, FramedWrite};
 
-use std::{io, error, fmt};
 use std::marker::PhantomData;
 
 /// Adapts a stream of JSON encoded buffers to a stream of values by
@@ -85,43 +84,13 @@ pub struct WriteJson<T: Sink, U> {
     inner: FramedWrite<T, U, Json<U>>,
 }
 
-#[derive(Debug)]
-pub enum Error {
-    Io(io::Error),
-    Serde(serde_json::Error),
-}
-
-impl error::Error for Error {
-    fn description(&self) -> &str {
-        match *self {
-            Error::Io(ref io) => io.description(),
-            Error::Serde(ref json) => json.description(),
-        }
-    }
-
-    fn cause(&self) -> Option<&error::Error> {
-        match *self {
-            Error::Io(ref io) => Some(io),
-            Error::Serde(ref serde) => Some(serde),
-        }
-    }
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            Error::Io(ref io) => fmt::Display::fmt(io, f),
-            Error::Serde(ref serde) => fmt::Display::fmt(serde, f),
-        }
-    }
-}
-
 struct Json<T> {
     ghost: PhantomData<T>,
 }
 
 impl<T, U> ReadJson<T, U>
-    where T: Stream<Error = io::Error>,
+    where T: Stream,
+          T::Error: From<serde_json::Error>,
           for<'a> U: Deserialize<'a>,
           Bytes: From<T::Item>,
 {
@@ -163,14 +132,15 @@ impl<T, U> ReadJson<T, U> {
 }
 
 impl<T, U> Stream for ReadJson<T, U>
-    where T: Stream<Error = io::Error>,
+    where T: Stream,
+          T::Error: From<serde_json::Error>,
           for<'a> U: Deserialize<'a>,
           Bytes: From<T::Item>,
 {
     type Item = U;
-    type Error = Error;
+    type Error = T::Error;
 
-    fn poll(&mut self) -> Poll<Option<U>, Error> {
+    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
         self.inner.poll()
     }
 }
@@ -196,7 +166,8 @@ impl<T, U> Sink for ReadJson<T, U>
 }
 
 impl<T, U> WriteJson<T, U>
-    where T: Sink<SinkItem = BytesMut, SinkError = io::Error>,
+    where T: Sink<SinkItem = BytesMut>,
+          T::SinkError: From<serde_json::Error>,
           U: Serialize,
 {
     /// Creates a new `WriteJson` with the given buffer sink.
@@ -234,21 +205,22 @@ impl<T: Sink, U> WriteJson<T, U> {
 }
 
 impl<T, U> Sink for WriteJson<T, U>
-    where T: Sink<SinkItem = BytesMut, SinkError = io::Error>,
+    where T: Sink<SinkItem = BytesMut>,
+          T::SinkError: From<serde_json::Error>,
           U: Serialize,
 {
     type SinkItem = U;
-    type SinkError = io::Error;
+    type SinkError = T::SinkError;
 
-    fn start_send(&mut self, item: U) -> StartSend<U, io::Error> {
+    fn start_send(&mut self, item: U) -> StartSend<U, T::SinkError> {
         self.inner.start_send(item)
     }
 
-    fn poll_complete(&mut self) -> Poll<(), io::Error> {
+    fn poll_complete(&mut self) -> Poll<(), T::SinkError> {
         self.inner.poll_complete()
     }
 
-    fn close(&mut self) -> Poll<(), io::Error> {
+    fn close(&mut self) -> Poll<(), T::SinkError> {
         self.inner.poll_complete()
     }
 }
@@ -267,26 +239,17 @@ impl<T, U> Stream for WriteJson<T, U>
 impl<T> Deserializer<T> for Json<T>
     where for <'a> T: Deserialize<'a>,
 {
-    type Error = Error;
+    type Error = serde_json::Error;
 
-    fn deserialize(&mut self, src: &Bytes) -> Result<T, Error> {
+    fn deserialize(&mut self, src: &Bytes) -> Result<T, Self::Error> {
         serde_json::from_reader(src.into_buf().reader())
-            .map_err(Error::Serde)
     }
 }
 
 impl<T: Serialize> Serializer<T> for Json<T> {
-    type Error = io::Error;
+    type Error = serde_json::Error;
 
-    fn serialize(&mut self, item: &T) -> Result<BytesMut, io::Error> {
-        serde_json::to_vec(item)
-            .map(Into::into)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
-    }
-}
-
-impl From<io::Error> for Error {
-    fn from(src: io::Error) -> Self {
-        Error::Io(src)
+    fn serialize(&mut self, item: &T) -> Result<BytesMut, Self::Error> {
+        serde_json::to_vec(item).map(Into::into)
     }
 }
