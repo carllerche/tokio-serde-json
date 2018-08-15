@@ -223,7 +223,7 @@ impl<T, U> Sink for WriteJson<T, U>
     }
 
     fn close(&mut self) -> Poll<(), T::SinkError> {
-        self.inner.poll_complete()
+        self.inner.close()
     }
 }
 
