@@ -24,10 +24,12 @@ use tokio_serde_json::{ReadJson, WriteJson};
 
 [serde]: https://serde.rs
 
-# License
+## License
 
-`tokio-serde-json` is primarily distributed under the terms of both the MIT
-license and the Apache License (Version 2.0), with portions covered by various
-BSD-like licenses.
+This project is licensed under the [MIT license](LICENSE).
 
-See LICENSE-APACHE, and LICENSE-MIT for details.
+### Contribution
+
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in `tower-web` by you, shall be licensed as MIT, without any
+additional terms or conditions.
