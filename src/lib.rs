@@ -73,6 +73,12 @@ use std::marker::PhantomData;
 /// deserializing the buffer as JSON. It expects that each yielded buffer
 /// represents a single JSON value and does not contain any extra trailing
 /// bytes.
+///
+/// If a `ReadJson` is used concurrently from two or more threads, it is
+/// guaranteed that only one object will be read at a time. In other words, once
+/// an object begins being read, that object will continue being read until it
+/// finishes or errors, and another object will only be read once the first
+/// object completes.
 pub struct ReadJson<T, U> {
     inner: FramedRead<T, U, Json<U>>,
 }
@@ -82,6 +88,12 @@ pub struct ReadJson<T, U> {
 /// `WriteJson` implements `Sink` by serializing the submitted values to a
 /// buffer. The buffer is then sent to the inner stream, which is responsible
 /// for handling framing on the wire.
+///
+/// If a `WriteJson` is used concurrently from two or more threads, it is
+/// guaranteed that the bytes of different objects written will not be
+/// interleaved. In other words, if two calls to `WriteJson::send` overlap, then
+/// the bytes of one object will be written entirely before the bytes of the
+/// other.
 pub struct WriteJson<T: Sink, U> {
     inner: FramedWrite<T, U, Json<U>>,
 }
