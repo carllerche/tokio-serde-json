@@ -11,7 +11,7 @@ To use `tokio-serde-json`, first add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-tokio-serde-json = { git = "https://github.com/carllerche/tokio-serde-json" }
+tokio-serde-json = "0.2"
 ```
 
 Next, add this to your crate:

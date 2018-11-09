@@ -15,11 +15,8 @@
 //! ```ignore
 //! use futures::{Future, Sink};
 //!
-//! use tokio_core::reactor::Core;
-//! use tokio_core::net::TcpStream;
+//! use tokio::{codec::{FramedWrite, LengthDelimitedCodec}, net::TcpStream};
 //!
-//! // Use length delimited frames
-//! use tokio_io::codec::length_delimited;
 //! use tokio_serde_json::WriteJson;
 //!
 //! // Bind a server socket
@@ -29,7 +26,7 @@
 //!
 //! socket.and_then(|socket| {
 //!     // Delimit frames using a length header
-//!     let length_delimited = length_delimited::FramedWrite::new(socket);
+//!     let length_delimited = FramedWrite::new(socket, LengthDelimitedCodec::new());
 //!
 //!     // Serialize frames with JSON
 //!     let serialized = WriteJson::new(length_delimited);
@@ -53,16 +50,16 @@
 //! [tokio-io]: https://github.com/tokio-rs/tokio-io
 //! [examples]: https://github.com/carllerche/tokio-serde-json/tree/master/examples
 
-extern crate futures;
 extern crate bytes;
+extern crate futures;
 extern crate serde;
 extern crate serde_json;
 extern crate tokio_serde;
 
-use futures::{Stream, Poll, Sink, StartSend};
-use bytes::{Bytes, BytesMut, Buf, IntoBuf};
-use serde::{Serialize, Deserialize};
-use tokio_serde::{Serializer, Deserializer, FramedRead, FramedWrite};
+use bytes::{Buf, Bytes, BytesMut, IntoBuf};
+use futures::{Poll, Sink, StartSend, Stream};
+use serde::{Deserialize, Serialize};
+use tokio_serde::{Deserializer, FramedRead, FramedWrite, Serializer};
 
 use std::marker::PhantomData;
 
@@ -103,15 +100,18 @@ struct Json<T> {
 }
 
 impl<T, U> ReadJson<T, U>
-    where T: Stream,
-          T::Error: From<serde_json::Error>,
-          for<'a> U: Deserialize<'a>,
-          Bytes: From<T::Item>,
+where
+    T: Stream,
+    T::Error: From<serde_json::Error>,
+    for<'a> U: Deserialize<'a>,
+    BytesMut: From<T::Item>,
 {
     /// Creates a new `ReadJson` with the given buffer stream.
     pub fn new(inner: T) -> ReadJson<T, U> {
         let json = Json { ghost: PhantomData };
-        ReadJson { inner: FramedRead::new(inner, json) }
+        ReadJson {
+            inner: FramedRead::new(inner, json),
+        }
     }
 }
 
@@ -146,10 +146,11 @@ impl<T, U> ReadJson<T, U> {
 }
 
 impl<T, U> Stream for ReadJson<T, U>
-    where T: Stream,
-          T::Error: From<serde_json::Error>,
-          for<'a> U: Deserialize<'a>,
-          Bytes: From<T::Item>,
+where
+    T: Stream,
+    T::Error: From<serde_json::Error>,
+    for<'a> U: Deserialize<'a>,
+    BytesMut: From<T::Item>,
 {
     type Item = U;
     type Error = T::Error;
@@ -160,13 +161,13 @@ impl<T, U> Stream for ReadJson<T, U>
 }
 
 impl<T, U> Sink for ReadJson<T, U>
-    where T: Sink,
+where
+    T: Sink,
 {
     type SinkItem = T::SinkItem;
     type SinkError = T::SinkError;
 
-    fn start_send(&mut self, item: T::SinkItem)
-                  -> StartSend<T::SinkItem, T::SinkError> {
+    fn start_send(&mut self, item: T::SinkItem) -> StartSend<T::SinkItem, T::SinkError> {
         self.get_mut().start_send(item)
     }
 
@@ -180,14 +181,17 @@ impl<T, U> Sink for ReadJson<T, U>
 }
 
 impl<T, U> WriteJson<T, U>
-    where T: Sink<SinkItem = BytesMut>,
-          T::SinkError: From<serde_json::Error>,
-          U: Serialize,
+where
+    T: Sink<SinkItem = Bytes>,
+    T::SinkError: From<serde_json::Error>,
+    U: Serialize,
 {
     /// Creates a new `WriteJson` with the given buffer sink.
     pub fn new(inner: T) -> WriteJson<T, U> {
         let json = Json { ghost: PhantomData };
-        WriteJson { inner: FramedWrite::new(inner, json) }
+        WriteJson {
+            inner: FramedWrite::new(inner, json),
+        }
     }
 }
 
@@ -219,9 +223,10 @@ impl<T: Sink, U> WriteJson<T, U> {
 }
 
 impl<T, U> Sink for WriteJson<T, U>
-    where T: Sink<SinkItem = BytesMut>,
-          T::SinkError: From<serde_json::Error>,
-          U: Serialize,
+where
+    T: Sink<SinkItem = Bytes>,
+    T::SinkError: From<serde_json::Error>,
+    U: Serialize,
 {
     type SinkItem = U;
     type SinkError = T::SinkError;
@@ -240,7 +245,8 @@ impl<T, U> Sink for WriteJson<T, U>
 }
 
 impl<T, U> Stream for WriteJson<T, U>
-    where T: Stream + Sink,
+where
+    T: Stream + Sink,
 {
     type Item = T::Item;
     type Error = T::Error;
@@ -251,11 +257,12 @@ impl<T, U> Stream for WriteJson<T, U>
 }
 
 impl<T> Deserializer<T> for Json<T>
-    where for <'a> T: Deserialize<'a>,
+where
+    for<'a> T: Deserialize<'a>,
 {
     type Error = serde_json::Error;
 
-    fn deserialize(&mut self, src: &Bytes) -> Result<T, Self::Error> {
+    fn deserialize(&mut self, src: &BytesMut) -> Result<T, Self::Error> {
         serde_json::from_reader(src.into_buf().reader())
     }
 }
@@ -263,7 +270,7 @@ impl<T> Deserializer<T> for Json<T>
 impl<T: Serialize> Serializer<T> for Json<T> {
     type Error = serde_json::Error;
 
-    fn serialize(&mut self, item: &T) -> Result<BytesMut, Self::Error> {
+    fn serialize(&mut self, item: &T) -> Result<Bytes, Self::Error> {
         serde_json::to_vec(item).map(Into::into)
     }
 }
