@@ -12,24 +12,27 @@
 //!
 //! # Examples
 //!
-//! ```ignore
-//! use futures::{Future, Sink};
+//! ```no_run
+//! use futures::prelude::*;
+//!
+//! use serde_json::json;
 //!
 //! use tokio::{codec::{FramedWrite, LengthDelimitedCodec}, net::TcpStream};
 //!
 //! use tokio_serde_json::WriteJson;
 //!
-//! // Bind a server socket
-//! let socket = TcpStream::connect(
-//!     &"127.0.0.1:17653".parse().unwrap(),
-//!     &handle);
+//! #[tokio::main]
+//! async fn main() {
+//!     // Bind a server socket
+//!     let socket = TcpStream::connect("127.0.0.1:17653")
+//!         .await
+//!         .unwrap();
 //!
-//! socket.and_then(|socket| {
 //!     // Delimit frames using a length header
 //!     let length_delimited = FramedWrite::new(socket, LengthDelimitedCodec::new());
 //!
 //!     // Serialize frames with JSON
-//!     let serialized = WriteJson::new(length_delimited);
+//!     let mut serialized = WriteJson::new(length_delimited);
 //!
 //!     // Send the value
 //!     serialized.send(json!({
@@ -39,8 +42,8 @@
 //!         "+44 1234567",
 //!         "+44 2345678"
 //!       ]
-//!     }))
-//! })
+//!     })).await.unwrap()
+//! }
 //! ```
 //!
 //! For a full working server and client example, see the [examples] directory.
@@ -50,18 +53,17 @@
 //! [tokio-io]: https://github.com/tokio-rs/tokio-io
 //! [examples]: https://github.com/carllerche/tokio-serde-json/tree/master/examples
 
-extern crate bytes;
-extern crate futures;
-extern crate serde;
-extern crate serde_json;
-extern crate tokio_serde;
-
 use bytes::{Buf, Bytes, BytesMut, IntoBuf};
-use futures::{Poll, Sink, StartSend, Stream};
+use futures::prelude::*;
+use pin_project::pin_project;
 use serde::{Deserialize, Serialize};
 use tokio_serde::{Deserializer, FramedRead, FramedWrite, Serializer};
 
-use std::marker::PhantomData;
+use std::{
+    marker::PhantomData,
+    pin::Pin,
+    task::{Context, Poll},
+};
 
 /// Adapts a stream of JSON encoded buffers to a stream of values by
 /// deserializing them.
@@ -76,7 +78,9 @@ use std::marker::PhantomData;
 /// an object begins being read, that object will continue being read until it
 /// finishes or errors, and another object will only be read once the first
 /// object completes.
+#[pin_project]
 pub struct ReadJson<T, U> {
+    #[pin]
     inner: FramedRead<T, U, Json<U>>,
 }
 
@@ -91,7 +95,9 @@ pub struct ReadJson<T, U> {
 /// interleaved. In other words, if two calls to `WriteJson::send` overlap, then
 /// the bytes of one object will be written entirely before the bytes of the
 /// other.
-pub struct WriteJson<T: Sink, U> {
+#[pin_project]
+pub struct WriteJson<T, U> {
+    #[pin]
     inner: FramedWrite<T, U, Json<U>>,
 }
 
@@ -99,23 +105,15 @@ struct Json<T> {
     ghost: PhantomData<T>,
 }
 
-impl<T, U> ReadJson<T, U>
-where
-    T: Stream,
-    T::Error: From<serde_json::Error>,
-    for<'a> U: Deserialize<'a>,
-    BytesMut: From<T::Item>,
-{
+impl<T, U> ReadJson<T, U> {
     /// Creates a new `ReadJson` with the given buffer stream.
-    pub fn new(inner: T) -> ReadJson<T, U> {
+    pub fn new(inner: T) -> Self {
         let json = Json { ghost: PhantomData };
-        ReadJson {
+        Self {
             inner: FramedRead::new(inner, json),
         }
     }
-}
 
-impl<T, U> ReadJson<T, U> {
     /// Returns a reference to the underlying stream wrapped by `ReadJson`.
     ///
     /// Note that care should be taken to not tamper with the underlying stream
@@ -147,55 +145,49 @@ impl<T, U> ReadJson<T, U> {
 
 impl<T, U> Stream for ReadJson<T, U>
 where
-    T: Stream,
+    T: TryStream<Ok = BytesMut>,
     T::Error: From<serde_json::Error>,
     for<'a> U: Deserialize<'a>,
-    BytesMut: From<T::Item>,
 {
-    type Item = U;
+    type Item = Result<U, T::Error>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.project().inner.poll_next(cx)
+    }
+}
+
+impl<T, U, SinkItem> Sink<SinkItem> for ReadJson<T, U>
+where
+    T: Sink<SinkItem>,
+{
     type Error = T::Error;
 
-    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        self.inner.poll()
+    fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.project().inner.poll_ready(cx)
+    }
+
+    fn start_send(self: Pin<&mut Self>, item: SinkItem) -> Result<(), Self::Error> {
+        self.project().inner.start_send(item)
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.project().inner.poll_flush(cx)
+    }
+
+    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.project().inner.poll_close(cx)
     }
 }
 
-impl<T, U> Sink for ReadJson<T, U>
-where
-    T: Sink,
-{
-    type SinkItem = T::SinkItem;
-    type SinkError = T::SinkError;
-
-    fn start_send(&mut self, item: T::SinkItem) -> StartSend<T::SinkItem, T::SinkError> {
-        self.get_mut().start_send(item)
-    }
-
-    fn poll_complete(&mut self) -> Poll<(), T::SinkError> {
-        self.get_mut().poll_complete()
-    }
-
-    fn close(&mut self) -> Poll<(), T::SinkError> {
-        self.get_mut().close()
-    }
-}
-
-impl<T, U> WriteJson<T, U>
-where
-    T: Sink<SinkItem = Bytes>,
-    T::SinkError: From<serde_json::Error>,
-    U: Serialize,
-{
-    /// Creates a new `WriteJson` with the given buffer sink.
-    pub fn new(inner: T) -> WriteJson<T, U> {
+impl<T, U> WriteJson<T, U> {
+    /// Creates a new `ReadJson` with the given buffer stream.
+    pub fn new(inner: T) -> Self {
         let json = Json { ghost: PhantomData };
-        WriteJson {
+        Self {
             inner: FramedWrite::new(inner, json),
         }
     }
-}
 
-impl<T: Sink, U> WriteJson<T, U> {
     /// Returns a reference to the underlying sink wrapped by `WriteJson`.
     ///
     /// Note that care should be taken to not tamper with the underlying sink as
@@ -222,37 +214,39 @@ impl<T: Sink, U> WriteJson<T, U> {
     }
 }
 
-impl<T, U> Sink for WriteJson<T, U>
+impl<T, U> Stream for WriteJson<T, U>
 where
-    T: Sink<SinkItem = Bytes>,
-    T::SinkError: From<serde_json::Error>,
-    U: Serialize,
+    T: Stream,
 {
-    type SinkItem = U;
-    type SinkError = T::SinkError;
+    type Item = T::Item;
 
-    fn start_send(&mut self, item: U) -> StartSend<U, T::SinkError> {
-        self.inner.start_send(item)
-    }
-
-    fn poll_complete(&mut self) -> Poll<(), T::SinkError> {
-        self.inner.poll_complete()
-    }
-
-    fn close(&mut self) -> Poll<(), T::SinkError> {
-        self.inner.close()
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.project().inner.poll_next(cx)
     }
 }
 
-impl<T, U> Stream for WriteJson<T, U>
+impl<T, U> Sink<U> for WriteJson<T, U>
 where
-    T: Stream + Sink,
+    T: Sink<Bytes>,
+    T::Error: From<serde_json::Error>,
+    U: Serialize,
 {
-    type Item = T::Item;
     type Error = T::Error;
 
-    fn poll(&mut self) -> Poll<Option<T::Item>, T::Error> {
-        self.get_mut().poll()
+    fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.project().inner.poll_ready(cx)
+    }
+
+    fn start_send(self: Pin<&mut Self>, item: U) -> Result<(), Self::Error> {
+        self.project().inner.start_send(item)
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.project().inner.poll_flush(cx)
+    }
+
+    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.project().inner.poll_close(cx)
     }
 }
 
@@ -262,7 +256,7 @@ where
 {
     type Error = serde_json::Error;
 
-    fn deserialize(&mut self, src: &BytesMut) -> Result<T, Self::Error> {
+    fn deserialize(self: Pin<&mut Self>, src: &BytesMut) -> Result<T, Self::Error> {
         serde_json::from_reader(src.into_buf().reader())
     }
 }
@@ -270,7 +264,7 @@ where
 impl<T: Serialize> Serializer<T> for Json<T> {
     type Error = serde_json::Error;
 
-    fn serialize(&mut self, item: &T) -> Result<Bytes, Self::Error> {
+    fn serialize(self: Pin<&mut Self>, item: &T) -> Result<Bytes, Self::Error> {
         serde_json::to_vec(item).map(Into::into)
     }
 }
