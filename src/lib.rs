@@ -1,4 +1,4 @@
-#![doc(html_root_url = "https://docs.rs/tokio-serde-json/0.1.0")]
+#![doc(html_root_url = "https://docs.rs/tokio-serde-json/0.3.0")]
 
 //! `Stream` and `Sink` adaptors for serializing and deserializing values using
 //! JSON.
